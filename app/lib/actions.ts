@@ -5,23 +5,44 @@ import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 import { z } from "zod"
 
+export type State = {
+  errors?: {
+    customerId?: string[],
+    amount?: string[],
+    status?: string[]
+  },
+  message?: string | null
+}
+
 const FormSchema = z.object({
   id: z.string(),
-  customerId: z.string(),
-  amount: z.coerce.number(),
-  status: z.enum(['pending', 'paid']),
+  customerId: z.string({
+    invalid_type_error: 'Please select a customer'
+  }),
+  amount: z.coerce.number().gt(0, { message: 'Enter an amount greater thar $0' }),
+  status: z.enum(['pending', 'paid'], {
+    invalid_type_error: 'select an invoice satus'
+  }),
   date: z.string(),
 })
 
 const InvoiceType = FormSchema.omit({ id: true, date: true })
 
-export async function createInvoice(formData: FormData) {
-  const { customerId, amount, status } = InvoiceType.parse({
+export async function createInvoice(prevState: State, formData: FormData) {
+  const validator = InvoiceType.safeParse({
     customerId: formData.get('customerId'),
     amount: formData.get('amount'),
     status: formData.get('status')
   })
 
+  if (!validator.success) {
+    return {
+      errors: validator.error.flatten().fieldErrors,
+      message: 'Missing fields'
+    }
+  }
+
+  const { customerId, amount, status } = validator.data
   const amountInCents = amount * 100
   const date = new Date().toISOString().split('T')[0]
 
@@ -63,7 +84,7 @@ export async function deleteInvoice(id: string) {
   try {
     await sql`DELETE FROM invoices WHERE id = ${id}`;
   } catch {
-    return { message: 'Database Error: Failed to delete invoice' }
+    return { message: 'Database Error:' }
   }
   revalidatePath('/dashboard/invoices');
 }
